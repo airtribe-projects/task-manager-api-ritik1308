@@ -1,130 +1,103 @@
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
 
-const tasksFilePath = path.join(__dirname, '../tasks.json');
+const TASK_FILE = path.join(__dirname, '../task.json');
 
-// Initialize with test data
-const initialTasks = [
-  {
-    id: 1,
-    title: "Set up environment",
-    description: "Install Node.js, npm, and git",
-    completed: true
+
+const readTasks = () => {
+  const data = fs.readFileSync(TASK_FILE, 'utf8');
+  const parsed = JSON.parse(data || '{}');
+  return parsed.tasks || [];
+};
+
+const writeTasks = (tasks) => {
+  fs.writeFileSync(TASK_FILE, JSON.stringify({ tasks }, null, 2));
+};
+
+const getNextId = (tasks) => {
+  const ids = tasks.map(t => t.id);
+  return ids.length ? Math.max(...ids) + 1 : 1;
+};
+
+const addTask = (req, res) => {
+  const { title, description, completed } = req.body;
+
+  if (typeof title !== 'string' || typeof description !== 'string' || typeof completed !== 'boolean') {
+    return res.status(400).send({ message: 'Invalid task data. Expected title, description (string), and completed (boolean).' });
   }
-];
 
-async function readTasks() {
-  try {
-    const data = await fs.readFile(tasksFilePath, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      await writeTasks(initialTasks);
-      return initialTasks;
-    }
-    throw error;
+  const tasks = readTasks();
+  const newTask = {
+    id: getNextId(tasks),
+    title,
+    description,
+    completed
+  };
+
+  tasks.push(newTask);
+  writeTasks(tasks);
+
+  res.status(201).send(newTask);
+};
+
+const getTaskById = (req, res) => {
+  const tasks = readTasks();
+  const id = parseInt(req.params.id);
+  const task = tasks.find(t => t.id === id);
+
+  if (!task) return res.status(404).send({ message: 'Task not found' });
+  res.send(task);
+};
+
+const deleteTask = (req, res) => {
+  let tasks = readTasks();
+  const id = parseInt(req.params.id);
+  const index = tasks.findIndex(t => t.id === id);
+
+  if (index === -1) return res.status(404).send({ message: 'Task not found' });
+
+  tasks.splice(index, 1);
+  writeTasks(tasks);
+
+  res.send({ message: 'Task deleted' });
+};
+
+const updateTask = (req, res) => {
+  let tasks = readTasks();
+  const id = parseInt(req.params.id);
+  const task = tasks.find(t => t.id === id);
+
+  if (!task) return res.status(404).send({ message: 'Task not found' });
+
+  const { title, description, completed } = req.body;
+
+  if (title && typeof title !== 'string') {
+    return res.status(400).send({ message: 'Title must be a string' });
   }
-}
+  if (description && typeof description !== 'string') {
+    return res.status(400).send({ message: 'Description must be a string' });
+  }
+  if (completed !== undefined && typeof completed !== 'boolean') {
+    return res.status(400).send({ message: 'Completed must be a boolean' });
+  }
 
-async function writeTasks(tasks) {
-  await fs.writeFile(tasksFilePath, JSON.stringify(tasks, null, 2));
-}
+  if (title) task.title = title;
+  if (description) task.description = description;
+  if (completed !== undefined) task.completed = completed;
+
+  writeTasks(tasks);
+  res.send(task);
+};
+
+const getAllTasks = (req, res) => {
+  const tasks = readTasks();
+  res.status(200).send(tasks);
+};
 
 module.exports = {
-  createTask: async (req, res) => {
-    try {
-      const { title, description, completed } = req.body;
-      
-      // Strict validation - all fields required for POST
-      if (!title || !description || typeof completed !== 'boolean') {
-        return res.status(400).send();
-      }
-
-      const tasks = await readTasks();
-      const newTask = {
-        id: tasks.length > 0 ? Math.max(...tasks.map(t => t.id)) + 1 : 1,
-        title,
-        description,
-        completed
-      };
-
-      tasks.push(newTask);
-      await writeTasks(tasks);
-
-      return res.status(201).send();
-    } catch (error) {
-      return res.status(500).send();
-    }
-  },
-
-  getAllTasks: async (req, res) => {
-    try {
-      const tasks = await readTasks();
-      return res.status(200).json(tasks);
-    } catch (error) {
-      return res.status(500).send();
-    }
-  },
-
-  getTaskById: async (req, res) => {
-    try {
-      const tasks = await readTasks();
-      const task = tasks.find(t => t.id === parseInt(req.params.id));
-      
-      if (!task) {
-        return res.status(404).send();
-      }
-      
-      return res.status(200).json(task);
-    } catch (error) {
-      return res.status(500).send();
-    }
-  },
-
-  updateTask: async (req, res) => {
-    try {
-      const { title, description, completed } = req.body;
-      
-      // All fields required for update
-      if (!title || !description || typeof completed !== 'boolean') {
-        return res.status(400).send();
-      }
-
-      const tasks = await readTasks();
-      const taskIndex = tasks.findIndex(t => t.id === parseInt(req.params.id));
-      
-      if (taskIndex === -1) {
-        return res.status(404).send();
-      }
-      
-      tasks[taskIndex] = {
-        id: parseInt(req.params.id),
-        title,
-        description,
-        completed
-      };
-      
-      await writeTasks(tasks);
-      return res.status(200).send();
-    } catch (error) {
-      return res.status(500).send();
-    }
-  },
-
-  deleteTask: async (req, res) => {
-    try {
-      const tasks = await readTasks();
-      const taskIndex = tasks.findIndex(t => t.id === parseInt(req.params.id));
-      
-      if (taskIndex === -1) {
-        return res.status(404).send();
-      }
-      
-      tasks.splice(taskIndex, 1);
-      await writeTasks(tasks);
-      return res.status(200).send();
-    } catch (error) {
-      return res.status(500).send();
-    }
-  }
+  getTaskById,
+  addTask,
+  deleteTask,
+  updateTask,
+  getAllTasks, // add this line
 };
